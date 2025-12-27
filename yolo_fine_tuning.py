@@ -9,6 +9,8 @@ import argparse
 import mlflow
 import torch
 import numpy as np
+import re
+import os
 
 # Попытка импорта torchvision для проверки совместимости
 try:
@@ -16,6 +18,63 @@ try:
     TORCHVISION_AVAILABLE = True
 except ImportError:
     TORCHVISION_AVAILABLE = False
+
+
+def get_mlflow_backend_uri(mlruns_dir):
+    """
+    Формирует правильный backend URI для MLflow с учетом особенностей Windows
+    
+    Parameters:
+    -----------
+    mlruns_dir : str or Path
+        Путь к директории mlruns
+        
+    Returns:
+    --------
+    str : Backend URI для MLflow
+    """
+    abs_path = os.path.abspath(mlruns_dir)
+    
+    if os.name == 'nt':  # Windows
+        # На Windows используем формат file:///D:/path/to/mlruns (с заглавной буквой диска)
+        # Преобразуем путь: D:\path\to\mlruns -> D:/path/to/mlruns
+        uri_path = abs_path.replace('\\', '/')
+        # Убеждаемся, что буква диска заглавная
+        if len(uri_path) > 1 and uri_path[1] == ':':
+            uri_path = uri_path[0].upper() + uri_path[1:]
+        backend_uri = f"file:///{uri_path}"
+    else:  # Unix/Linux/Mac
+        backend_uri = f"file://{abs_path}"
+    
+    return backend_uri
+
+
+def clean_metric_name(name):
+    """
+    Очищает имя метрики от недопустимых символов для MLflow
+    
+    MLflow разрешает только: alphanumerics, underscores (_), dashes (-), 
+    periods (.), spaces ( ) и slashes (/)
+    
+    Parameters:
+    -----------
+    name : str
+        Исходное имя метрики
+        
+    Returns:
+    --------
+    str : Очищенное имя метрики
+    """
+    # Удаляем скобки и их содержимое
+    name = re.sub(r'\([^)]*\)', '', name)
+    # Удаляем другие недопустимые символы (оставляем только разрешенные)
+    # Разрешенные: буквы, цифры, _, -, ., пробелы, /
+    name = re.sub(r'[^a-zA-Z0-9_\-\.\s/]', '_', name)
+    # Заменяем множественные подчеркивания на одно
+    name = re.sub(r'_+', '_', name)
+    # Удаляем подчеркивания в начале и конце
+    name = name.strip('_')
+    return name
 
 
 def compute_gradient_norm(model):
@@ -48,6 +107,33 @@ def compute_gradient_norm(model):
     return total_norm
 
 
+def convert_to_float(value):
+    """
+    Преобразует значение метрики в float для логирования в MLflow
+    
+    Parameters:
+    -----------
+    value : any
+        Значение метрики (может быть Tensor, numpy array, float, int и т.д.)
+        
+    Returns:
+    --------
+    float : Преобразованное значение или None, если не удалось преобразовать
+    """
+    try:
+        if isinstance(value, torch.Tensor):
+            return float(value.item())
+        elif isinstance(value, (np.ndarray, np.generic)):
+            return float(value.item() if value.size == 1 else value.flat[0])
+        elif isinstance(value, (int, float)):
+            return float(value)
+        else:
+            # Попытка преобразования через float()
+            return float(value)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def log_to_mlflow_epoch_end(trainer):
     """
     Колбэк для логирования метрик в конце каждой эпохи обучения
@@ -57,48 +143,78 @@ def log_to_mlflow_epoch_end(trainer):
     trainer : DetectionTrainer
         Объект тренера YOLO
     """
-    # Логирование метрик обучения
-    metrics_dict = {}
-    
-    # Получение метрик из trainer
-    if hasattr(trainer, 'metrics'):
-        metrics_dict.update(trainer.metrics)
-    
-    # Логирование loss
-    if hasattr(trainer, 'loss'):
-        if isinstance(trainer.loss, (list, tuple)):
-            # Если loss - это список/кортеж, логируем каждый компонент
-            for i, loss_val in enumerate(trainer.loss):
-                if isinstance(loss_val, torch.Tensor):
-                    metrics_dict[f'train/loss_component_{i}'] = loss_val.item()
-        elif isinstance(trainer.loss, torch.Tensor):
-            metrics_dict['train/loss'] = trainer.loss.item()
-        elif isinstance(trainer.loss, (int, float)):
-            metrics_dict['train/loss'] = float(trainer.loss)
-    
-    # Логирование нормы градиентов
-    if hasattr(trainer, 'model') and trainer.model is not None:
-        try:
-            grad_norm = compute_gradient_norm(trainer.model)
-            metrics_dict['train/gradient_norm'] = grad_norm
-        except Exception as e:
-            print(f"Предупреждение: не удалось вычислить норму градиентов: {e}")
-    
-    # Логирование learning rate
-    if hasattr(trainer, 'optimizer') and trainer.optimizer is not None:
-        try:
-            current_lr = trainer.optimizer.param_groups[0]['lr']
-            metrics_dict['train/learning_rate'] = current_lr
-        except Exception:
-            pass
-    
-    # Логирование метрик в MLflow
-    if metrics_dict:
-        try:
-            mlflow.log_metrics(metrics_dict, step=trainer.epoch)
-            print(f"[Epoch {trainer.epoch}] Logged to MLflow: {len(metrics_dict)} metrics")
-        except Exception as e:
-            print(f"Предупреждение: не удалось залогировать метрики в MLflow: {e}")
+    try:
+        # Проверка активного MLflow run
+        if mlflow.active_run() is None:
+            return
+        
+        metrics_dict = {}
+        
+        # Получение номера эпохи (trainer.epoch - текущая эпоха)
+        epoch = getattr(trainer, 'epoch', 0)
+        # Проверяем, что epoch - это число (может быть 0-indexed или 1-indexed)
+        if not isinstance(epoch, (int, float)) or epoch < 0:
+            epoch = 0
+        
+        # Получение total loss (tloss - правильный атрибут для YOLO)
+        if hasattr(trainer, 'tloss'):
+            tloss_value = convert_to_float(trainer.tloss)
+            if tloss_value is not None:
+                metrics_dict['train/total_loss'] = tloss_value
+        
+        # Получение компонентов loss через loss_names и loss_items
+        if hasattr(trainer, 'loss_names') and hasattr(trainer, 'loss_items'):
+            if isinstance(trainer.loss_names, (list, tuple)) and isinstance(trainer.loss_items, (list, tuple)):
+                for loss_name, loss_value in zip(trainer.loss_names, trainer.loss_items):
+                    loss_float = convert_to_float(loss_value)
+                    if loss_float is not None:
+                        clean_name = clean_metric_name(f'train/loss_{loss_name}')
+                        metrics_dict[clean_name] = loss_float
+        
+        # Получение метрик обучения из словаря metrics (если доступен)
+        # Обрабатываем только метрики обучения (не валидационные)
+        if hasattr(trainer, 'metrics') and isinstance(trainer.metrics, dict):
+            for key, value in trainer.metrics.items():
+                # Пропускаем валидационные метрики (они начинаются с 'metrics/' и логируются в on_val_end)
+                key_lower = key.lower()
+                if 'val' not in key_lower and not key_lower.startswith('metrics/'):
+                    value_float = convert_to_float(value)
+                    if value_float is not None:
+                        clean_key = clean_metric_name(f'train/{key}')
+                        metrics_dict[clean_key] = value_float
+        
+        # Логирование learning rate
+        if hasattr(trainer, 'optimizer') and trainer.optimizer is not None:
+            try:
+                if len(trainer.optimizer.param_groups) > 0:
+                    current_lr = trainer.optimizer.param_groups[0].get('lr', None)
+                    if current_lr is not None:
+                        metrics_dict['train/learning_rate'] = float(current_lr)
+            except Exception:
+                pass
+        
+        # Логирование нормы градиентов
+        if hasattr(trainer, 'model') and trainer.model is not None:
+            try:
+                grad_norm = compute_gradient_norm(trainer.model)
+                if grad_norm is not None:
+                    metrics_dict['train/gradient_norm'] = float(grad_norm)
+            except Exception:
+                pass
+        
+        # Логирование метрик в MLflow
+        if metrics_dict:
+            # Очистка имен метрик от недопустимых символов
+            clean_metrics = {}
+            for key, value in metrics_dict.items():
+                clean_key = clean_metric_name(key)
+                clean_metrics[clean_key] = value
+            
+            mlflow.log_metrics(clean_metrics, step=epoch)
+            print(f"[Epoch {epoch}] Logged {len(clean_metrics)} training metrics to MLflow")
+            
+    except Exception as e:
+        print(f"⚠ Ошибка при логировании метрик обучения в MLflow: {e}")
 
 
 def log_to_mlflow_val_end(trainer):
@@ -110,48 +226,75 @@ def log_to_mlflow_val_end(trainer):
     trainer : DetectionTrainer
         Объект тренера YOLO
     """
-    # Логирование метрик валидации
-    val_metrics = {}
-    
-    # Получение метрик валидации
-    if hasattr(trainer, 'metrics'):
-        metrics = trainer.metrics
+    try:
+        # Проверка активного MLflow run
+        if mlflow.active_run() is None:
+            return
         
-        # Извлечение основных метрик
-        if 'metrics/mAP50(B)' in metrics:
-            val_metrics['val/mAP50'] = metrics['metrics/mAP50(B)']
-        if 'metrics/mAP50-95(B)' in metrics:
-            val_metrics['val/mAP50-95'] = metrics['metrics/mAP50-95(B)']
-        if 'metrics/precision(B)' in metrics:
-            val_metrics['val/precision'] = metrics['metrics/precision(B)']
-        if 'metrics/recall(B)' in metrics:
-            val_metrics['val/recall'] = metrics['metrics/recall(B)']
+        val_metrics = {}
         
-        # Логирование всех доступных метрик валидации
-        for key, value in metrics.items():
-            if 'val' in key.lower() or 'metrics' in key.lower():
-                clean_key = key.replace('/', '_').replace('(', '').replace(')', '')
-                val_metrics[f'val/{clean_key}'] = value
-    
-    # Логирование loss валидации, если доступен
-    if hasattr(trainer, 'validator') and hasattr(trainer.validator, 'loss'):
-        val_loss = trainer.validator.loss
-        if isinstance(val_loss, (list, tuple)):
-            for i, loss_val in enumerate(val_loss):
-                if isinstance(loss_val, torch.Tensor):
-                    val_metrics[f'val/loss_component_{i}'] = loss_val.item()
-        elif isinstance(val_loss, torch.Tensor):
-            val_metrics['val/loss'] = val_loss.item()
-        elif isinstance(val_loss, (int, float)):
-            val_metrics['val/loss'] = float(val_loss)
-    
-    # Логирование метрик в MLflow
-    if val_metrics:
-        try:
-            mlflow.log_metrics(val_metrics, step=trainer.epoch)
-            print(f"[Epoch {trainer.epoch}] Logged validation metrics to MLflow: {len(val_metrics)} metrics")
-        except Exception as e:
-            print(f"Предупреждение: не удалось залогировать метрики валидации в MLflow: {e}")
+        # Получение номера эпохи (trainer.epoch - текущая эпоха)
+        epoch = getattr(trainer, 'epoch', 0)
+        # Проверяем, что epoch - это число (может быть 0-indexed или 1-indexed)
+        if not isinstance(epoch, (int, float)) or epoch < 0:
+            epoch = 0
+        
+        # Получение метрик валидации из словаря metrics
+        if hasattr(trainer, 'metrics') and isinstance(trainer.metrics, dict):
+            metrics = trainer.metrics
+            
+            # Извлечение основных метрик валидации
+            metric_mappings = {
+                'metrics/mAP50(B)': 'val/mAP50',
+                'metrics/mAP50-95(B)': 'val/mAP50-95',
+                'metrics/mAP75(B)': 'val/mAP75',
+                'metrics/precision(B)': 'val/precision',
+                'metrics/recall(B)': 'val/recall',
+            }
+            
+            for metric_key, metric_name in metric_mappings.items():
+                if metric_key in metrics:
+                    value_float = convert_to_float(metrics[metric_key])
+                    if value_float is not None:
+                        val_metrics[metric_name] = value_float
+            
+            # Логирование всех метрик, содержащих 'metrics' в ключе
+            for key, value in metrics.items():
+                if 'metrics' in key.lower():
+                    # Пропускаем уже обработанные метрики
+                    if key not in metric_mappings:
+                        value_float = convert_to_float(value)
+                        if value_float is not None:
+                            clean_key = clean_metric_name(key)
+                            val_metrics[f'val/{clean_key}'] = value_float
+        
+        # Получение метрик валидации через validator, если доступен
+        if hasattr(trainer, 'validator'):
+            validator = trainer.validator
+            
+            # Попытка получить метрики из results validator'а
+            if hasattr(validator, 'results_dict') and isinstance(validator.results_dict, dict):
+                for key, value in validator.results_dict.items():
+                    value_float = convert_to_float(value)
+                    if value_float is not None:
+                        clean_key = clean_metric_name(f'val/{key}')
+                        val_metrics[clean_key] = value_float
+        
+        # Логирование метрик в MLflow
+        if val_metrics:
+            # Очистка имен метрик от недопустимых символов
+            clean_val_metrics = {}
+            for key, value in val_metrics.items():
+                clean_key = clean_metric_name(key)
+                clean_val_metrics[clean_key] = value
+            
+            mlflow.log_metrics(clean_val_metrics, step=epoch)
+            print(f"[Epoch {epoch}] Logged {len(clean_val_metrics)} validation metrics to MLflow")
+        else:
+            print(f"[Epoch {epoch}] No validation metrics to log")
+            
+    except Exception as e:
+        print(f"⚠ Ошибка при логировании метрик валидации в MLflow: {e}")
 
 
 def train_yolo_model(
@@ -302,11 +445,19 @@ def train_yolo_model(
             mlflow.set_tracking_uri(mlflow_tracking_uri)
             print(f"✓ MLflow tracking URI установлен: {mlflow_tracking_uri}")
         else:
-            # Локальное хранилище MLflow
-            mlflow_uri = f"{project}/mlflow"
-            mlflow.set_tracking_uri(mlflow_uri)
-            Path(mlflow_uri).mkdir(parents=True, exist_ok=True)
-            print(f"✓ Локальное хранилище MLflow: {Path(mlflow_uri).absolute()}")
+            # Локальное хранилище MLflow в директории mlruns корня проекта
+            # Используем тот же путь, что и в start_mlflow_ui.py
+            BASE_DIR = Path(__file__).parent.absolute()
+            MLRUNS_DIR = BASE_DIR / "mlruns"
+            
+            # Создаем директорию, если её нет
+            MLRUNS_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # Формируем правильный backend URI (как в start_mlflow_ui.py)
+            backend_uri = get_mlflow_backend_uri(MLRUNS_DIR)
+            mlflow.set_tracking_uri(backend_uri)
+            print(f"✓ Локальное хранилище MLflow: {MLRUNS_DIR.absolute()}")
+            print(f"✓ Backend URI: {backend_uri}")
         
         # Установка или создание эксперимента
         try:
@@ -522,15 +673,26 @@ def train_yolo_model(
         
         # Логирование финальных метрик и артефактов в MLflow
         try:
-            final_metrics = {
+            final_metrics_raw = {
                 'final/mAP50-95': metrics.box.map,
                 'final/mAP50': metrics.box.map50,
                 'final/mAP75': metrics.box.map75,
                 'final/precision': metrics.box.mp,
                 'final/recall': metrics.box.mr,
             }
-            mlflow.log_metrics(final_metrics)
-            print("✓ Финальные метрики залогированы в MLflow")
+            # Преобразование метрик в float и очистка имен
+            final_metrics = {}
+            for key, value in final_metrics_raw.items():
+                value_float = convert_to_float(value)
+                if value_float is not None:
+                    clean_key = clean_metric_name(key)
+                    final_metrics[clean_key] = value_float
+            
+            if final_metrics:
+                mlflow.log_metrics(final_metrics)
+                print("✓ Финальные метрики залогированы в MLflow")
+            else:
+                print("⚠ Не удалось преобразовать финальные метрики")
             
             if best_model_path.exists():
                 mlflow.log_artifact(str(best_model_path), artifact_path="model")
