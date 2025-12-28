@@ -857,11 +857,17 @@
 
                 // Показываем обработанное видео
                 const videoUrl = `/api/video/${data.output_file}`;
-                downloadBtn.href = `/api/download/${data.output_file}`;
+                
+                // Формируем base_name для скачивания архива
+                const baseName = data.output_file.replace('processed_', '').replace('.mp4', '');
+                downloadBtn.href = `/api/download/${baseName}`;
+                downloadBtn.textContent = '📥 Скачать все результаты (ZIP)';
+                downloadBtn.title = 'Скачать архив с исходным видео, обработанным видео и metadata.json';
                 
                 document.getElementById('videoInfo').innerHTML = `
                     <div style="margin-top: 10px; font-size: 0.9rem; color: #666;">
-                        <strong>Модель:</strong> ${data.model} / ${data.version}.pt
+                        <div><strong>Модель:</strong> ${data.model} / ${data.version}.pt</div>
+                        <div style="margin-top: 5px;"><strong>Файлы:</strong> исходное видео, обработанное видео, metadata.json</div>
                     </div>
                 `;
 
