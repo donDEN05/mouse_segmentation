@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Mouse Detection - Обработка видео</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #ffffff;
+            color: #2c2c2c;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            width: 100%;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding-bottom: 30px;
+            border-bottom: 2px solid #2c2c2c;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            letter-spacing: 3px;
+            color: #2c2c2c;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 0.9rem;
+            color: #666;
+            font-weight: 300;
+            letter-spacing: 1px;
+        }
+
+        .form-section {
+            background-color: #f8f8f8;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #2c2c2c;
+            letter-spacing: 0.5px;
+        }
+
+        .custom-select-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .custom-select {
+            width: 100%;
+            padding: 12px 15px;
+            padding-right: 40px;
+            border: 2px solid #2c2c2c;
+            background-color: #ffffff;
+            color: #2c2c2c;
+            font-size: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .custom-select:hover {
+            border-color: #4a4a4a;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(44, 44, 44, 0.1);
+        }
+
+        .custom-select.active {
+            border-color: #2c2c2c;
+            box-shadow: 0 0 0 3px rgba(44, 44, 44, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .custom-select.disabled {
+            background-color: #f5f5f5;
+            color: #999;
+            cursor: not-allowed;
+            border-color: #ddd;
+        }
+
+        .custom-select-arrow {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            transition: transform 0.3s ease;
+            pointer-events: none;
+        }
+
+        .custom-select.active .custom-select-arrow {
+            transform: translateY(-50%) rotate(180deg);
+        }
+
+        .custom-select-options {
+            position: absolute;
+            top: calc(100% + 5px);
+            left: 0;
+            right: 0;
+            background-color: #ffffff;
+            border: 2px solid #2c2c2c;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(44, 44, 44, 0.15);
+            z-index: 1000;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .custom-select-options.show {
+            max-height: 300px;
+            opacity: 1;
+            transform: translateY(0);
+            overflow-y: auto;
+        }
+
+        .custom-select-options::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .custom-select-options::-webkit-scrollbar-track {
+            background: #f8f8f8;
+            border-radius: 4px;
+        }
+
+        .custom-select-options::-webkit-scrollbar-thumb {
+            background: #2c2c2c;
+            border-radius: 4px;
+            transition: background 0.3s ease;
+        }
+
+        .custom-select-options::-webkit-scrollbar-thumb:hover {
+            background: #1a1a1a;
+        }
+
+        .custom-select-option {
+            padding: 12px 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #2c2c2c;
+            border-bottom: 1px solid #f0f0f0;
+            position: relative;
+        }
+
+        .custom-select-option:first-child {
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+        }
+
+        .custom-select-option:last-child {
+            border-bottom: none;
+            border-bottom-left-radius: 6px;
+            border-bottom-right-radius: 6px;
+        }
+
+        .custom-select-option:hover {
+            background-color: #f8f8f8;
+        }
+
+        .custom-select-option.selected {
+            background-color: #2c2c2c;
+            color: #ffffff;
+        }
+
+        select.hidden-select {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            height: 0;
+        }
+
+        /* Стили для загрузки файла */
+        .file-upload-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .file-upload-input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .file-upload-label {
+            display: block;
+            width: 100%;
+            padding: 40px 20px;
+            border: 2px dashed #2c2c2c;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background-color: #ffffff;
+        }
+
+        .file-upload-label:hover {
+            border-color: #4a4a4a;
+            background-color: #f8f8f8;
+        }
+
+        .file-upload-label.has-file {
+            border-color: #2c2c2c;
+            background-color: #f0f0f0;
+        }
+
+        .file-upload-text {
+            font-size: 1rem;
+            color: #2c2c2c;
+            margin-bottom: 10px;
+        }
+
+        .file-upload-hint {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .file-name {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: #2c2c2c;
+            font-weight: 500;
+        }
+
+        /* Поле для порога уверенности */
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #2c2c2c;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            background: #1a1a1a;
+            transform: scale(1.1);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #2c2c2c;
+            cursor: pointer;
+            border: none;
+        }
+
+        .conf-value {
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: 500;
+            color: #2c2c2c;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background-color: #2c2c2c;
+            color: #ffffff;
+            border: none;
+            font-size: 1rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            background-color: #1a1a1a;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            background-color: #999;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #2c2c2c;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            display: none;
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 4px solid #c62828;
+            transition: all 0.3s ease;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        .video-section {
+            display: none;
+            background-color: #f8f8f8;
+            padding: 30px;
+            border-radius: 12px;
+            margin-top: 30px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .video-section.show {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .video-header {
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .video-title {
+            font-size: 1.3rem;
+            font-weight: 500;
+            color: #2c2c2c;
+            margin-bottom: 10px;
+        }
+
+        .video-info {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .video-controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .btn-secondary {
+            padding: 10px 20px;
+            background-color: #ffffff;
+            color: #2c2c2c;
+            border: 2px solid #2c2c2c;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+            background-color: #2c2c2c;
+            color: #ffffff;
+        }
+
+
+        footer {
+            margin-top: auto;
+            text-align: center;
+            padding: 30px 20px;
+            color: #999;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>YOLO MOUSE DETECTION</h1>
+            <p class="subtitle">Обработка видео с детекцией мышей</p>
+        </header>
+
+        <div class="form-section">
+            <form id="videoForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="modelSelect">Выберите модель:</label>
+                    {% if models %}
+                    <div class="custom-select-wrapper">
+                        <select id="modelSelect" name="model" class="hidden-select" required>
+                            {% for key, info in models.items() %}
+                            <option value="{{ key }}" data-versions="{{ info.versions|join(',') }}" data-default-version="{{ info.default_version }}" {% if loop.first %}selected{% endif %}>
+                                {{ info.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="custom-select" id="customSelect">
+                            <span class="custom-select-text">
+                                {% for key, info in models.items() %}
+                                    {% if loop.first %}{{ info.name }}{% endif %}
+                                {% endfor %}
+                            </span>
+                            <svg class="custom-select-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M6 9L1 4H11L6 9Z" fill="#2c2c2c"/>
+                            </svg>
+                        </div>
+                        <div class="custom-select-options" id="customSelectOptions">
+                            {% for key, info in models.items() %}
+                            <div class="custom-select-option {% if loop.first %}selected{% endif %}" data-value="{{ key }}">
+                                {{ info.name }}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label for="versionSelect">Выберите версию весов:</label>
+                        {% if models %}
+                        <div class="custom-select-wrapper">
+                            <select id="versionSelect" name="version" class="hidden-select" required>
+                                {% for key, info in models.items() %}
+                                    {% if loop.first %}
+                                        {% for version in info.versions %}
+                                        <option value="{{ version }}" {% if version == info.default_version %}selected{% endif %}>
+                                            {{ version }}.pt
+                                        </option>
+                                        {% endfor %}
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                            <div class="custom-select" id="customVersionSelect">
+                                <span class="custom-select-text" id="customVersionSelectText">
+                                    {% for key, info in models.items() %}
+                                        {% if loop.first %}
+                                            {{ info.default_version }}.pt
+                                        {% endif %}
+                                    {% endfor %}
+                                </span>
+                                <svg class="custom-select-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M6 9L1 4H11L6 9Z" fill="#2c2c2c"/>
+                                </svg>
+                            </div>
+                            <div class="custom-select-options" id="customVersionSelectOptions">
+                                {% for key, info in models.items() %}
+                                    {% if loop.first %}
+                                        {% for version in info.versions %}
+                                        <div class="custom-select-option {% if version == info.default_version %}selected{% endif %}" data-value="{{ version }}">
+                                            {{ version }}.pt
+                                        </div>
+                                        {% endfor %}
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="custom-select-wrapper">
+                        <select id="modelSelect" name="model" class="hidden-select" required disabled>
+                            <option>Модели не найдены</option>
+                        </select>
+                        <div class="custom-select disabled" id="customSelect">
+                            <span class="custom-select-text">Модели не найдены</span>
+                            <svg class="custom-select-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M6 9L1 4H11L6 9Z" fill="#999"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <p style="margin-top: 10px; color: #c62828; font-size: 0.85rem;">
+                        ⚠️ Модели не найдены. Убедитесь, что в папке runs/detect есть модели с весами
+                    </p>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="confThreshold">Порог уверенности: <span class="conf-value" id="confValue">0.25</span></label>
+                    <input type="range" id="confThreshold" name="conf_threshold" min="0.1" max="1.0" step="0.05" value="0.25">
+                </div>
+
+                <div class="form-group">
+                    <label for="videoInput">Выберите видео файл:</label>
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="videoInput" name="video" class="file-upload-input" accept="video/*" required>
+                        <label for="videoInput" class="file-upload-label" id="fileUploadLabel">
+                            <div class="file-upload-text">📹 Нажмите для выбора видео файла</div>
+                            <div class="file-upload-hint">Поддерживаемые форматы: MP4, AVI, MOV, MKV, FLV, WMV, WEBM, M4V</div>
+                            <div class="file-name" id="fileName" style="display: none;"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn" id="submitBtn">Обработать видео</button>
+            </form>
+
+            <div class="loading" id="loading">
+                <div class="loading-spinner"></div>
+                <div>Обработка видео... Это может занять некоторое время</div>
+            </div>
+
+            <div class="error" id="error"></div>
+        </div>
+
+        <div class="video-section" id="videoSection">
+            <div class="video-header">
+                <div class="video-title">Обработанное видео</div>
+                <div class="video-info" id="videoInfo"></div>
+            </div>
+
+            <div class="video-wrapper">
+                <video id="processedVideo" controls></video>
+            </div>
+
+            <div class="video-controls">
+                <a href="#" id="downloadBtn" class="btn-secondary" download>📥 Скачать видео</a>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>YOLO Mouse Detection API &copy; 2025</p>
+    </footer>
+
+    <script>
+        const form = document.getElementById('videoForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const videoSection = document.getElementById('videoSection');
+        const videoElement = document.getElementById('processedVideo');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const videoInput = document.getElementById('videoInput');
+        const fileUploadLabel = document.getElementById('fileUploadLabel');
+        const fileName = document.getElementById('fileName');
+        const modelSelect = document.getElementById('modelSelect');
+        const versionSelect = document.getElementById('versionSelect');
+        const customSelect = document.getElementById('customSelect');
+        const customSelectOptions = document.getElementById('customSelectOptions');
+        const customSelectText = customSelect ? customSelect.querySelector('.custom-select-text') : null;
+        const customVersionSelect = document.getElementById('customVersionSelect');
+        const customVersionSelectOptions = document.getElementById('customVersionSelectOptions');
+        const customVersionSelectText = customVersionSelect ? document.getElementById('customVersionSelectText') : null;
+        const confThreshold = document.getElementById('confThreshold');
+        const confValue = document.getElementById('confValue');
+
+        // Обновление значения порога уверенности
+        confThreshold.addEventListener('input', function() {
+            confValue.textContent = parseFloat(this.value).toFixed(2);
+        });
+
+        // Обработка выбора файла
+        videoInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                fileName.textContent = file.name;
+                fileName.style.display = 'block';
+                fileUploadLabel.classList.add('has-file');
+            } else {
+                fileName.style.display = 'none';
+                fileUploadLabel.classList.remove('has-file');
+            }
+        });
+
+        // Инициализация кастомного dropdown для моделей
+        if (customSelect && customSelectOptions && !customSelect.classList.contains('disabled')) {
+            customSelect.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const isActive = this.classList.contains('active');
+                
+                document.querySelectorAll('.custom-select.active').forEach(el => {
+                    if (el !== this) {
+                        el.classList.remove('active');
+                        el.nextElementSibling?.classList.remove('show');
+                    }
+                });
+                
+                this.classList.toggle('active');
+                customSelectOptions.classList.toggle('show');
+            });
+
+            const options = customSelectOptions.querySelectorAll('.custom-select-option');
+            options.forEach(option => {
+                option.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const value = this.getAttribute('data-value');
+                    const text = this.textContent;
+                    
+                    if (customSelectText) {
+                        customSelectText.textContent = text;
+                    }
+                    
+                    if (modelSelect) {
+                        const selectedOption = modelSelect.querySelector(`option[value="${value}"]`);
+                        if (selectedOption) {
+                            modelSelect.value = value;
+                            
+                            // Обновляем версии в скрытом select и кастомном dropdown
+                            const versions = selectedOption.getAttribute('data-versions').split(',');
+                            const defaultVersion = selectedOption.getAttribute('data-default-version');
+                            
+                            // Обновляем скрытый select
+                            versionSelect.innerHTML = '';
+                            versions.forEach(version => {
+                                const option = document.createElement('option');
+                                option.value = version;
+                                option.textContent = version + '.pt';
+                                if (version === defaultVersion) {
+                                    option.selected = true;
+                                }
+                                versionSelect.appendChild(option);
+                            });
+                            
+                            // Обновляем кастомный dropdown версий
+                            if (customVersionSelectOptions && customVersionSelectText) {
+                                customVersionSelectOptions.innerHTML = '';
+                                versions.forEach(version => {
+                                    const optionDiv = document.createElement('div');
+                                    optionDiv.className = 'custom-select-option';
+                                    optionDiv.setAttribute('data-value', version);
+                                    optionDiv.textContent = version + '.pt';
+                                    if (version === defaultVersion) {
+                                        optionDiv.classList.add('selected');
+                                        customVersionSelectText.textContent = version + '.pt';
+                                    }
+                                    customVersionSelectOptions.appendChild(optionDiv);
+                                });
+                                
+                                // Добавляем обработчики событий для новых опций
+                                const versionOptions = customVersionSelectOptions.querySelectorAll('.custom-select-option');
+                                versionOptions.forEach(option => {
+                                    option.addEventListener('click', function(e) {
+                                        e.stopPropagation();
+                                        const versionValue = this.getAttribute('data-value');
+                                        const versionText = this.textContent;
+                                        
+                                        if (customVersionSelectText) {
+                                            customVersionSelectText.textContent = versionText;
+                                        }
+                                        
+                                        if (versionSelect) {
+                                            versionSelect.value = versionValue;
+                                        }
+                                        
+                                        versionOptions.forEach(opt => opt.classList.remove('selected'));
+                                        this.classList.add('selected');
+                                        
+                                        customVersionSelect.classList.remove('active');
+                                        customVersionSelectOptions.classList.remove('show');
+                                    });
+                                });
+                            }
+                        }
+                    }
+                    
+                    options.forEach(opt => opt.classList.remove('selected'));
+                    this.classList.add('selected');
+                    
+                    customSelect.classList.remove('active');
+                    customSelectOptions.classList.remove('show');
+                });
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!customSelect.contains(e.target) && !customSelectOptions.contains(e.target)) {
+                    customSelect.classList.remove('active');
+                    customSelectOptions.classList.remove('show');
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    customSelect.classList.remove('active');
+                    customSelectOptions.classList.remove('show');
+                }
+            });
+        }
+
+        // Инициализация кастомного dropdown для версий
+        if (customVersionSelect && customVersionSelectOptions && !customVersionSelect.classList.contains('disabled')) {
+            customVersionSelect.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const isActive = this.classList.contains('active');
+                
+                // Закрываем все другие открытые dropdown
+                document.querySelectorAll('.custom-select.active').forEach(el => {
+                    if (el !== this) {
+                        el.classList.remove('active');
+                        el.nextElementSibling?.classList.remove('show');
+                    }
+                });
+                
+                this.classList.toggle('active');
+                customVersionSelectOptions.classList.toggle('show');
+            });
+
+            // Выбор версии
+            const versionOptions = customVersionSelectOptions.querySelectorAll('.custom-select-option');
+            versionOptions.forEach(option => {
+                option.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const versionValue = this.getAttribute('data-value');
+                    const versionText = this.textContent;
+                    
+                    if (customVersionSelectText) {
+                        customVersionSelectText.textContent = versionText;
+                    }
+                    
+                    if (versionSelect) {
+                        versionSelect.value = versionValue;
+                    }
+                    
+                    versionOptions.forEach(opt => opt.classList.remove('selected'));
+                    this.classList.add('selected');
+                    
+                    customVersionSelect.classList.remove('active');
+                    customVersionSelectOptions.classList.remove('show');
+                });
+            });
+
+            // Закрытие при клике вне элемента
+            document.addEventListener('click', function(e) {
+                if (!customVersionSelect.contains(e.target) && !customVersionSelectOptions.contains(e.target)) {
+                    customVersionSelect.classList.remove('active');
+                    customVersionSelectOptions.classList.remove('show');
+                }
+            });
+
+            // Закрытие при нажатии Escape
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    customVersionSelect.classList.remove('active');
+                    customVersionSelectOptions.classList.remove('show');
+                }
+            });
+        }
+
+        // Обработка отправки формы
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const videoFile = videoInput.files[0];
+            const model = modelSelect ? modelSelect.value : null;
+            const version = versionSelect ? versionSelect.value : null;
+            const conf = confThreshold.value;
+
+            if (!videoFile) {
+                showError('Пожалуйста, выберите видео файл');
+                return;
+            }
+
+            if (!model) {
+                showError('Пожалуйста, выберите модель');
+                return;
+            }
+
+            // Показываем загрузку
+            submitBtn.disabled = true;
+            loading.classList.add('show');
+            error.classList.remove('show');
+            videoSection.classList.remove('show');
+
+            try {
+                const formData = new FormData();
+                formData.append('video', videoFile);
+                formData.append('model', model);
+                formData.append('version', version);
+                formData.append('conf_threshold', conf);
+
+                const response = await fetch('/api/process_video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Произошла ошибка при обработке видео');
+                }
+
+                // Показываем обработанное видео
+                const videoUrl = `/api/video/${data.output_file}`;
+                downloadBtn.href = `/api/download/${data.output_file}`;
+                
+                document.getElementById('videoInfo').innerHTML = `
+                    <div style="margin-top: 10px; font-size: 0.9rem; color: #666;">
+                        <strong>Модель:</strong> ${data.model} / ${data.version}.pt
+                    </div>
+                `;
+
+                // Загружаем видео
+                videoElement.src = videoUrl;
+                videoElement.load(); // Принудительно загружаем видео
+                
+                // Обработка ошибок загрузки видео
+                videoElement.addEventListener('error', function(e) {
+                    console.error('Ошибка загрузки видео:', e);
+                    showError('Не удалось загрузить видео. Попробуйте скачать файл.');
+                });
+                
+                videoSection.classList.add('show');
+                videoSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                submitBtn.disabled = false;
+                loading.classList.remove('show');
+            }
+        });
+
+        function showError(message) {
+            error.textContent = message;
+            error.classList.add('show');
+        }
+    </script>
+</body>
+</html>
+

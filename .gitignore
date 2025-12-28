@@ -5,6 +5,8 @@
 /runs/
 /tracking_datasets_extracted/
 /yolo_dataset_epm1/
+/uploads/
+/outputs/
 develop.ipynb
 yolo11n.pt
 mlflow.db
